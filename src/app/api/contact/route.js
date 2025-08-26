@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import connectDB from '../../../lib/db.js';
+import { sendEmail } from '../../../lib/email.js';
 
 export async function POST(request) {
   try {
@@ -26,7 +27,6 @@ export async function POST(request) {
     }
 
     // Store contact inquiry (you can create a Contact model if needed)
-    // For now, we'll just log it and return success
     console.log('Contact Form Submission:', {
       name,
       email,
@@ -37,10 +37,31 @@ export async function POST(request) {
       timestamp: new Date().toISOString()
     });
 
-    // In a real application, you would:
-    // 1. Save to database
-    // 2. Send email notification
-    // 3. Send auto-reply to customer
+    // Send notification email to admin
+    try {
+      if (process.env.ADMIN_EMAIL) {
+        await sendEmail(process.env.ADMIN_EMAIL, 'contactNotification', {
+          name,
+          email,
+          phone,
+          subject,
+          message,
+          category
+        });
+      }
+    } catch (emailError) {
+      console.error('Failed to send admin notification email:', emailError);
+    }
+
+    // Send auto-reply to customer
+    try {
+      await sendEmail(email, 'contactAutoReply', {
+        name,
+        subject
+      });
+    } catch (emailError) {
+      console.error('Failed to send auto-reply email:', emailError);
+    }
 
     return NextResponse.json({
       message: 'Thank you for your message! We will get back to you soon.',

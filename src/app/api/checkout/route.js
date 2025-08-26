@@ -4,6 +4,7 @@ import User from '../../../models/User.js';
 import Box from '../../../models/Box.js';
 import Order from '../../../models/Order.js';
 import { verifyToken } from '../../../lib/auth.js';
+import { sendEmail } from '../../../lib/email.js';
 
 // POST - Process checkout
 export async function POST(request) {
@@ -35,7 +36,8 @@ export async function POST(request) {
       paymentDetails,
       useCartItems = true,
       customItems = [],
-      notes 
+      notes,
+      referralCode 
     } = body;
 
     // Validation
@@ -134,7 +136,26 @@ export async function POST(request) {
     const subtotal = orderItems.reduce((sum, item) => sum + item.total, 0);
     const shipping = subtotal > 500 ? 0 : 50; // Free shipping over ₹500
     const tax = Math.round(subtotal * 0.18); // 18% GST
-    const total = subtotal + shipping + tax;
+    
+    // Apply referral discount if provided
+    let referralDiscount = 0;
+    let referralData = null;
+    
+    if (referralCode) {
+      try {
+        const Referral = (await import('../../../models/Referral.js')).default;
+        const validation = await Referral.validateAndApply(referralCode, decoded.userId, subtotal);
+        referralDiscount = validation.discountAmount;
+        referralData = validation.referral;
+      } catch (error) {
+        return NextResponse.json(
+          { error: error.message },
+          { status: 400 }
+        );
+      }
+    }
+    
+    const total = subtotal + shipping + tax - referralDiscount;
 
     // Create order
     const order = new Order({
@@ -149,6 +170,8 @@ export async function POST(request) {
       tax,
       total,
       notes,
+      referralCode: referralCode || null,
+      referralDiscount,
       status: 'pending',
       paymentStatus: paymentMethod === 'cod' ? 'pending' : 'awaiting_verification'
     });
@@ -163,6 +186,15 @@ export async function POST(request) {
       );
     }
 
+    // Record referral usage if applicable
+    if (referralCode && referralData && referralDiscount > 0) {
+      try {
+        await referralData.recordUsage(decoded.userId, order._id, referralDiscount);
+      } catch (error) {
+        console.error('Error recording referral usage:', error);
+      }
+    }
+
     // Clear user's cart if using cart items
     if (useCartItems) {
       user.cart = [];
@@ -171,6 +203,14 @@ export async function POST(request) {
 
     // Populate box details for response
     await order.populate('items.box', 'name image price');
+
+    // Send order confirmation email
+    try {
+      await sendEmail(user.email, 'orderConfirmation', order, user);
+      console.log('Order confirmation email sent to:', user.email);
+    } catch (emailError) {
+      console.error('Failed to send order confirmation email:', emailError);
+    }
 
     return NextResponse.json({
       message: 'Order created successfully',
