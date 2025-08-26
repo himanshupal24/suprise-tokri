@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { userAPI } from '../../lib/api.js';
+import { userAPI, cartAPI } from '../../lib/api.js';
 
 export default function WishlistPage() {
   const [wishlist, setWishlist] = useState(null);
@@ -43,11 +43,11 @@ export default function WishlistPage() {
 
   const handleAddToCart = async (boxId) => {
     try {
-      // This would integrate with cart API when implemented
-      alert('Add to cart functionality will be implemented');
+      await cartAPI.addToCart({ boxId, quantity: 1 });
+      alert('Added to cart');
     } catch (err) {
       console.error('Failed to add to cart:', err);
-      setError('Failed to add item to cart');
+      setError(err?.message || 'Failed to add item to cart');
     }
   };
 

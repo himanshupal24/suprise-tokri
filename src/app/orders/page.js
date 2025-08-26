@@ -1,122 +1,78 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { userAPI } from '@/lib/api';
 
 export default function OrdersPage() {
   const [activeFilter, setActiveFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Mock orders data
-  const orders = [
-    {
-      id: 'ORD-2024-001',
-      date: '2024-03-15',
-      status: 'Delivered',
-      items: [
-        { name: 'Mystery Snack Box', quantity: 1, price: '₹599' },
-        { name: 'Birthday Surprise Box', quantity: 1, price: '₹700' }
-      ],
-      total: '₹1,299',
-      tracking: 'DLVR-123456789',
-      deliveryDate: '2024-03-18',
-      paymentMethod: 'UPI'
-    },
-    {
-      id: 'ORD-2024-002',
-      date: '2024-03-10',
-      status: 'Shipped',
-      items: [
-        { name: 'Valentine Special Box', quantity: 1, price: '₹899' }
-      ],
-      total: '₹899',
-      tracking: 'SHIP-987654321',
-      deliveryDate: null,
-      paymentMethod: 'COD'
-    },
-    {
-      id: 'ORD-2024-003',
-      date: '2024-03-05',
-      status: 'Packed',
-      items: [
-        { name: 'Friendship Day Box', quantity: 1, price: '₹599' }
-      ],
-      total: '₹599',
-      tracking: null,
-      deliveryDate: null,
-      paymentMethod: 'UPI'
-    },
-    {
-      id: 'ORD-2024-004',
-      date: '2024-02-28',
-      status: 'Delivered',
-      items: [
-        { name: 'Diwali Special Box', quantity: 2, price: '₹799' }
-      ],
-      total: '₹1,598',
-      tracking: 'DLVR-456789123',
-      deliveryDate: '2024-03-02',
-      paymentMethod: 'UPI'
-    },
-    {
-      id: 'ORD-2024-005',
-      date: '2024-02-20',
-      status: 'Delivered',
-      items: [
-        { name: 'Holi Celebration Box', quantity: 1, price: '₹499' }
-      ],
-      total: '₹499',
-      tracking: 'DLVR-789123456',
-      deliveryDate: '2024-02-23',
-      paymentMethod: 'COD'
-    },
-    {
-      id: 'ORD-2024-006',
-      date: '2024-02-15',
-      status: 'Delivered',
-      items: [
-        { name: 'New Year Surprise Box', quantity: 1, price: '₹999' }
-      ],
-      total: '₹999',
-      tracking: 'DLVR-321654987',
-      deliveryDate: '2024-02-18',
-      paymentMethod: 'UPI'
+  const [orders, setOrders] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const loadOrders = async () => {
+    try {
+      setIsLoading(true);
+      setError('');
+      const res = await userAPI.getOrders({ limit: 50 });
+      setOrders(res.orders || []);
+    } catch (e) {
+      setError(e?.message || 'Failed to load orders');
+    } finally {
+      setIsLoading(false);
     }
-  ];
+  };
+
+  useEffect(() => {
+    loadOrders();
+  }, []);
 
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'Delivered': return 'text-green-600 bg-green-100';
-      case 'Shipped': return 'text-blue-600 bg-blue-100';
-      case 'Packed': return 'text-yellow-600 bg-yellow-100';
-      case 'Pending': return 'text-gray-600 bg-gray-100';
+    switch (status?.toLowerCase()) {
+      case 'delivered': return 'text-green-600 bg-green-100';
+      case 'shipped': return 'text-blue-600 bg-blue-100';
+      case 'packed': return 'text-yellow-600 bg-yellow-100';
+      case 'pending': return 'text-gray-600 bg-gray-100';
       default: return 'text-gray-600 bg-gray-100';
     }
   };
 
   const getStatusIcon = (status) => {
-    switch (status) {
-      case 'Delivered': return '✅';
-      case 'Shipped': return '🚚';
-      case 'Packed': return '📦';
-      case 'Pending': return '⏳';
+    switch (status?.toLowerCase()) {
+      case 'delivered': return '✅';
+      case 'shipped': return '🚚';
+      case 'packed': return '📦';
+      case 'pending': return '⏳';
       default: return '⏳';
     }
   };
 
-  const filteredOrders = orders.filter(order => {
+  const normalizedOrders = orders.map(o => ({
+    id: o.id || o.orderNumber || o._id,
+    date: new Date(o.createdAt).toISOString().slice(0,10),
+    status: o.status || 'pending',
+    items: (o.items || []).map(it => ({ name: it.box?.name || 'Item', quantity: it.quantity, price: `₹${it.price || it.total || 0}` })),
+    total: `₹${o.totalAmount || o.total || 0}`,
+    tracking: o.trackingNumber || null,
+    deliveryDate: o.estimatedDelivery || null,
+    paymentMethod: o.paymentMethod || 'UPI',
+  }));
+
+  const filteredOrders = normalizedOrders.filter(order => {
     const matchesFilter = activeFilter === 'all' || order.status.toLowerCase() === activeFilter;
-    const matchesSearch = order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = order.id.toString().toLowerCase().includes(searchTerm.toLowerCase()) ||
                          order.items.some(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()));
     return matchesFilter && matchesSearch;
   });
 
   const statusCounts = {
-    all: orders.length,
-    delivered: orders.filter(o => o.status === 'Delivered').length,
-    shipped: orders.filter(o => o.status === 'Shipped').length,
-    packed: orders.filter(o => o.status === 'Packed').length,
-    pending: orders.filter(o => o.status === 'Pending').length
+    all: normalizedOrders.length,
+    delivered: normalizedOrders.filter(o => o.status.toLowerCase() === 'delivered').length,
+    shipped: normalizedOrders.filter(o => o.status.toLowerCase() === 'shipped').length,
+    packed: normalizedOrders.filter(o => o.status.toLowerCase() === 'packed').length,
+    pending: normalizedOrders.filter(o => o.status.toLowerCase() === 'pending').length
   };
 
   return (
@@ -130,7 +86,8 @@ export default function OrdersPage() {
               <p className="text-gray-600">Track your order history and status</p>
             </div>
             <Link href="/dashboard" className="text-purple-600 hover:text-purple-700">
-              ← Back to Dashboard
+              
+ Back to Dashboard
             </Link>
           </div>
         </div>
@@ -172,13 +129,18 @@ export default function OrdersPage() {
         </div>
 
         {/* Orders List */}
+        {isLoading ? (
+          <div className="bg-white rounded-lg shadow p-8 text-center text-gray-600">Loading orders...</div>
+        ) : error ? (
+          <div className="bg-white rounded-lg shadow p-8 text-center text-red-600">{error}</div>
+        ) : (
         <div className="space-y-4">
           {filteredOrders.length === 0 ? (
             <div className="bg-white rounded-lg shadow p-8 text-center">
               <div className="text-4xl mb-4">📦</div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">No orders found</h3>
               <p className="text-gray-600 mb-4">
-                {searchTerm ? 'Try adjusting your search terms.' : 'You haven\'t placed any orders yet.'}
+                {searchTerm ? 'Try adjusting your search terms.' : 'You\'t placed any orders yet.'}
               </p>
               <Link 
                 href="/boxes" 
@@ -218,104 +180,46 @@ export default function OrdersPage() {
                 <div className="p-6">
                   <div className="space-y-3">
                     {order.items.map((item, index) => (
-                      <div key={index} className="flex justify-between items-center">
+                      <div key={index} className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
-                          <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                          <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
                             <span className="text-lg">🎁</span>
                           </div>
                           <div>
                             <p className="font-medium text-gray-900">{item.name}</p>
-                            <p className="text-sm text-gray-600">Qty: {item.quantity}</p>
+                            <p className="text-sm text-gray-600">Quantity: {item.quantity}</p>
                           </div>
                         </div>
                         <p className="font-medium text-gray-900">{item.price}</p>
                       </div>
                     ))}
                   </div>
+                </div>
 
-                  {/* Order Summary */}
-                  <div className="mt-6 pt-4 border-t border-gray-200">
-                    <div className="flex justify-between items-center">
-                      <div className="space-y-1">
-                        <p className="text-sm text-gray-600">
-                          Payment: {order.paymentMethod}
-                        </p>
-                        {order.tracking && (
-                          <p className="text-sm text-gray-600">
-                            Tracking: {order.tracking}
-                          </p>
-                        )}
-                        {order.deliveryDate && (
-                          <p className="text-sm text-gray-600">
-                            Delivered: {order.deliveryDate}
-                          </p>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <p className="text-lg font-bold text-gray-900">Total: {order.total}</p>
-                      </div>
+                {/* Order Footer */}
+                <div className="p-6 bg-gray-50 rounded-b-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-600">
+                      <p>Total: <span className="font-semibold text-gray-900">{order.total}</span></p>
+                      {order.tracking && (
+                        <p>Tracking: <span className="font-semibold text-gray-900">{order.tracking}</span></p>
+                      )}
                     </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Link 
-                      href={`/orders/${order.id}`}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
-                    >
-                      View Details
-                    </Link>
-                    {order.status === 'Delivered' && (
-                      <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium">
-                        Reorder
-                      </button>
-                    )}
-                    {order.tracking && (
-                      <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium">
-                        Track Package
-                      </button>
-                    )}
+                    <div className="flex items-center space-x-4">
+                      <Link 
+                        href={`/orders/${order.id}`}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                      >
+                        View Details
+                      </Link>
+                    </div>
                   </div>
                 </div>
               </div>
             ))
           )}
         </div>
-
-        {/* Order Status Legend */}
-        <div className="mt-8 bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Order Status Guide</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="flex items-center space-x-3">
-              <span className="text-2xl">⏳</span>
-              <div>
-                <p className="font-medium text-gray-900">Pending</p>
-                <p className="text-sm text-gray-600">Order confirmed, processing</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <span className="text-2xl">📦</span>
-              <div>
-                <p className="font-medium text-gray-900">Packed</p>
-                <p className="text-sm text-gray-600">Items packed, ready to ship</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <span className="text-2xl">🚚</span>
-              <div>
-                <p className="font-medium text-gray-900">Shipped</p>
-                <p className="text-sm text-gray-600">On the way to you</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <span className="text-2xl">✅</span>
-              <div>
-                <p className="font-medium text-gray-900">Delivered</p>
-                <p className="text-sm text-gray-600">Successfully delivered</p>
-              </div>
-            </div>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -1,70 +1,78 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { userAPI, cartAPI } from '@/lib/api';
 
 export default function CheckoutPage() {
   const [activeStep, setActiveStep] = useState(1);
-  const [selectedAddress, setSelectedAddress] = useState(1);
+  const [selectedAddress, setSelectedAddress] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('upi');
   const [deliveryOption, setDeliveryOption] = useState('standard');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Mock cart data
-  const cartItems = [
-    {
-      id: 1,
-      name: 'Mystery Snack Box',
-      price: 599,
-      quantity: 2,
-      image: '🎁'
-    },
-    {
-      id: 2,
-      name: 'Valentine Special Box',
-      price: 899,
-      quantity: 1,
-      image: '💝'
+  const [addresses, setAddresses] = useState([]);
+  const [items, setItems] = useState([]);
+  const [summary, setSummary] = useState({ itemCount: 0, totalQuantity: 0, subtotal: 0, shipping: 0, tax: 0, total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const loadCheckoutData = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      // Load addresses
+      const addrRes = await userAPI.getAddresses();
+      const fetchedAddresses = addrRes.addresses || [];
+      setAddresses(fetchedAddresses);
+      const defaultAddress = fetchedAddresses.find(a => a.isDefault) || fetchedAddresses[0] || null;
+      setSelectedAddress(defaultAddress ? defaultAddress.id : null);
+
+      // Validate checkout from cart
+      const validateRes = await fetch('/api/checkout', { headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` } });
+      if (!validateRes.ok) {
+        const err = await validateRes.json().catch(() => ({ error: 'Checkout validation failed' }));
+        throw new Error(err.error || 'Checkout validation failed');
+      }
+      const validateData = await validateRes.json();
+      setItems(validateData.items || []);
+      setSummary(validateData.summary || { itemCount: 0, totalQuantity: 0, subtotal: 0, shipping: 0, tax: 0, total: 0 });
+    } catch (e) {
+      setError(e?.message || 'Failed to load checkout data');
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  // Mock addresses
-  const addresses = [
-    {
-      id: 1,
-      type: 'Home',
-      name: 'Priya Sharma',
-      address: '123, Sunshine Apartments, Sector 15',
-      city: 'Mumbai',
-      state: 'Maharashtra',
-      pincode: '400001',
-      phone: '+91 98765 43210',
-      isDefault: true
-    },
-    {
-      id: 2,
-      type: 'Office',
-      name: 'Priya Sharma',
-      address: '456, Tech Park, Andheri West',
-      city: 'Mumbai',
-      state: 'Maharashtra',
-      pincode: '400058',
-      phone: '+91 98765 43210',
-      isDefault: false
+  useEffect(() => {
+    loadCheckoutData();
+  }, []);
+
+  const shippingAmount = useMemo(() => (deliveryOption === 'express' ? summary.shipping + 50 : summary.shipping), [deliveryOption, summary.shipping]);
+  const totalAmount = useMemo(() => summary.subtotal + shippingAmount + summary.tax, [summary.subtotal, shippingAmount, summary.tax]);
+
+  const handlePlaceOrder = async () => {
+    if (!selectedAddress) {
+      alert('Please select a delivery address');
+      return;
     }
-  ];
-
-  const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const shipping = deliveryOption === 'express' ? 100 : 50;
-  const tax = subtotal * 0.05;
-  const total = subtotal + shipping + tax;
-
-  const handlePlaceOrder = () => {
-    setIsProcessing(true);
-    setTimeout(() => {
-      alert('Order placed successfully! You will receive a confirmation email shortly.');
+    try {
+      setIsProcessing(true);
+      const shippingAddress = addresses.find(a => a.id === selectedAddress);
+      const orderRes = await cartAPI.createOrder({
+        shippingAddress,
+        billingAddress: shippingAddress,
+        paymentMethod,
+        paymentDetails: {},
+        useCartItems: true,
+        notes: ''
+      });
+      alert('Order placed successfully! Order Number: ' + orderRes?.order?.orderNumber);
       setIsProcessing(false);
-    }, 2000);
+    } catch (e) {
+      setIsProcessing(false);
+      alert(e?.message || 'Failed to place order');
+    }
   };
 
   return (
@@ -78,13 +86,20 @@ export default function CheckoutPage() {
               <p className="text-gray-600">Complete your order</p>
             </div>
             <Link href="/cart" className="text-purple-600 hover:text-purple-700">
-              ← Back to Cart
+              
+ Back to Cart
             </Link>
           </div>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {loading ? (
+          <div className="text-center py-12 text-gray-600">Loading checkout...</div>
+        ) : error ? (
+          <div className="text-center py-12 text-red-600">{error}</div>
+        ) : (
+        <>
         {/* Progress Steps */}
         <div className="mb-8">
           <div className="flex items-center justify-center">
@@ -230,94 +245,59 @@ export default function CheckoutPage() {
                         </div>
                       </div>
                     </div>
-                  </div>
-                  
-                  <div className="mt-6 flex space-x-4">
-                    <button
-                      onClick={() => setActiveStep(1)}
-                      className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={() => setActiveStep(3)}
-                      className="flex-1 bg-purple-600 text-white py-2 rounded-lg font-semibold hover:bg-purple-700"
-                    >
-                      Continue to Review
-                    </button>
+
+                    <div className="mt-6">
+                      <button
+                        onClick={() => setActiveStep(3)}
+                        className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700"
+                      >
+                        Continue to Review
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Step 3: Review Order */}
+            {/* Step 3: Review */}
             {activeStep === 3 && (
               <div className="bg-white rounded-lg shadow">
                 <div className="p-6 border-b border-gray-200">
-                  <h2 className="text-xl font-semibold text-gray-900">Review Order</h2>
+                  <h2 className="text-xl font-semibold text-gray-900">Review Your Order</h2>
                 </div>
-                <div className="p-6">
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="font-medium text-gray-900 mb-2">Delivery Address</h3>
-                      <div className="bg-gray-50 p-4 rounded-lg">
-                        {(() => {
-                          const address = addresses.find(a => a.id === selectedAddress);
-                          return (
-                            <div className="text-sm text-gray-600">
-                              <p className="font-medium text-gray-900">{address.name}</p>
-                              <p>{address.address}</p>
-                              <p>{address.city}, {address.state} {address.pincode}</p>
-                              <p>{address.phone}</p>
+                <div className="p-6 space-y-6">
+                  {/* Items */}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">Items</h3>
+                    <div className="space-y-3">
+                      {items.map((it, idx) => (
+                        <div key={idx} className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 bg-purple-100 rounded flex items-center justify-center">
+                              <span>{it.box?.image || '🎁'}</span>
                             </div>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <h3 className="font-medium text-gray-900 mb-2">Payment Method</h3>
-                      <div className="bg-gray-50 p-4 rounded-lg">
-                        <p className="text-sm text-gray-600">
-                          {paymentMethod === 'upi' ? 'UPI Payment' : 'Cash on Delivery'}
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <h3 className="font-medium text-gray-900 mb-2">Order Items</h3>
-                      <div className="space-y-2">
-                        {cartItems.map((item) => (
-                          <div key={item.id} className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
-                            <div className="flex items-center space-x-3">
-                              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                                <span className="text-lg">{item.image}</span>
-                              </div>
-                              <div>
-                                <p className="font-medium text-gray-900">{item.name}</p>
-                                <p className="text-sm text-gray-600">Qty: {item.quantity}</p>
-                              </div>
+                            <div>
+                              <p className="font-medium text-gray-900">{it.box?.name}</p>
+                              <p className="text-sm text-gray-600">Qty: {it.quantity}</p>
                             </div>
-                            <p className="font-medium text-gray-900">₹{item.price * item.quantity}</p>
                           </div>
-                        ))}
-                      </div>
+                          <div className="text-right">
+                            <p className="text-gray-900">
+{it.total}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  
-                  <div className="mt-6 flex space-x-4">
+
+                  <div className="mt-6">
                     <button
-                      onClick={() => setActiveStep(2)}
-                      className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                    >
-                      Back
-                    </button>
-                    <button
-                      onClick={handlePlaceOrder}
                       disabled={isProcessing}
-                      className="flex-1 bg-purple-600 text-white py-2 rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-50"
+                      onClick={handlePlaceOrder}
+                      className={`w-full ${isProcessing ? 'bg-purple-400' : 'bg-purple-600 hover:bg-purple-700'} text-white py-3 rounded-lg font-semibold`}
                     >
-                      {isProcessing ? 'Processing...' : 'Place Order'}
+                      {isProcessing ? 'Placing Order...' : 'Place Order'}
                     </button>
                   </div>
                 </div>
@@ -325,88 +305,43 @@ export default function CheckoutPage() {
             )}
           </div>
 
-          {/* Order Summary */}
-          <div className="space-y-6">
+          {/* Sidebar Summary */}
+          <div>
             <div className="bg-white rounded-lg shadow p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Order Summary</h3>
-              
-              {/* Delivery Options */}
-              <div className="mb-4">
-                <h4 className="font-medium text-gray-900 mb-2">Delivery Options</h4>
-                <div className="space-y-2">
-                  <label className="flex items-center space-x-2">
-                    <input
-                      type="radio"
-                      name="delivery"
-                      checked={deliveryOption === 'standard'}
-                      onChange={() => setDeliveryOption('standard')}
-                    />
-                    <span className="text-sm">Standard Delivery (3-5 days) - ₹50</span>
-                  </label>
-                  <label className="flex items-center space-x-2">
-                    <input
-                      type="radio"
-                      name="delivery"
-                      checked={deliveryOption === 'express'}
-                      onChange={() => setDeliveryOption('express')}
-                    />
-                    <span className="text-sm">Express Delivery (1-2 days) - ₹100</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Price Breakdown */}
               <div className="space-y-3">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Subtotal</span>
-                  <span className="text-gray-900">₹{subtotal}</span>
+                  <span className="text-gray-600">Subtotal ({summary.totalQuantity} items)</span>
+                  <span className="text-gray-900">
+{summary.subtotal}
+                  </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Shipping</span>
-                  <span className="text-gray-900">₹{shipping}</span>
+                  <span className="text-gray-600">Shipping ({deliveryOption === 'express' ? 'Express' : 'Standard'})</span>
+                  <span className="text-gray-900">
+{shippingAmount}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Tax</span>
-                  <span className="text-gray-900">₹{tax.toFixed(2)}</span>
+                  <span className="text-gray-900">
+{summary.tax}
+                  </span>
                 </div>
                 <div className="pt-3 border-t border-gray-200">
                   <div className="flex justify-between">
                     <span className="text-lg font-semibold text-gray-900">Total</span>
-                    <span className="text-lg font-semibold text-gray-900">₹{total.toFixed(2)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Security Info */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Security & Privacy</h3>
-              <div className="space-y-3">
-                <div className="flex items-center space-x-3">
-                  <span className="text-2xl">🔒</span>
-                  <div>
-                    <p className="font-medium text-gray-900">Secure Payment</p>
-                    <p className="text-sm text-gray-600">Your payment information is encrypted</p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <span className="text-2xl">🛡️</span>
-                  <div>
-                    <p className="font-medium text-gray-900">Privacy Protected</p>
-                    <p className="text-sm text-gray-600">We never share your personal data</p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <span className="text-2xl">✅</span>
-                  <div>
-                    <p className="font-medium text-gray-900">Money Back Guarantee</p>
-                    <p className="text-sm text-gray-600">30-day return policy for damaged items</p>
+                    <span className="text-lg font-semibold text-gray-900">
+{totalAmount}
+                    </span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );
